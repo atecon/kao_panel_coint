@@ -1,0 +1,119 @@
+set verbose off
+#clear
+
+function matrix cointPanelKao (series y "endogenous",
+                               list X "regressors",
+                               bool robust[1] "Robust (default)",
+      bool timeEff[1] "Add time-effecte (default)",
+      bool verbose[1] "Print details (default)")
+
+    # See Baltagi, ch. 12
+    # see code: "/home/at/ownCloud/gretl_script/ExternalProgs/Breitung_Panelprogs/NPT/Src/pcoin_t1.src"
+
+    # FE regression
+    string optRob = ""
+    string optVer = ""
+    string optTime = ""
+    if robust==1
+        optRob = "--robust"
+    elif verbose==0
+        optVer = "--quiet"
+    elif timeD==1
+        optTime = "--time-dummies"
+    endif
+    panel y 0 X --fixed-effects @optRob @optVer @optTime
+
+    # Grab parameters
+    scalar n = max($unit)
+    scalar T = $pd
+    scalar nT = $T
+
+    # Construct rho and S.E.(rho)
+    series e = $uhat
+    ols e e(-1) @optRob @optVer
+    scalar rho = $coeff[1]
+
+    # Construct se
+    scalar S = 0
+    matrix me = mshape({e},T,n)
+    matrix mat_se_sq = zeros(1,n)
+    matrix mat_e_sq = zeros(1,n)
+    loop j=1..n -q
+        tmp_se_sq = 0
+        tmp_e_sq = 0
+        loop i=2..T -q
+            tmp_se_sq = tmp_se_sq + (me[i,j]-rho*me[i-1,j])^2
+            tmp_e_sq = tmp_e_sq + me[i-1,j]^2
+        endloop
+        mat_se_sq[j] = tmp_se_sq
+        mat_e_sq[j] = tmp_e_sq
+    endloop
+    se_sq=sumr(mat_se_sq)/(n*(T-1))
+    e_sq = sumr(mat_e_sq)
+    trho=(rho-1)*sqrt(e_sq)/sqrt(se_sq)
+
+    # TEST STATISTICS
+    # construct DF-type tests (all converge to standard normal)
+    # DFp and DFt assume strict exogeneity of the regressors and errors
+    DFp = (sqrt(n)*T*(rho-1)+3*sqrt(n)) / sqrt(10.2)
+    DFt = sqrt(1.25)*trho + sqrt(1.875)*n
+    # FIXME: A note on computing DFt
+    # - in Baltagi (5th ed.): DFt=sqrt(1.25)*trho+sqrt(1.875*n)
+    # - in Kao's code: df_t_rho=sqrt(1.25)*t_rho+sqrt(1.875*N)
+    # - in Chihwa Kao, Min-Hsien Chiang and Bangtian Che: "INTERNATIONAL R&D SPILLOVERS: AN
+    # 	APPLICATION OF ESTIMATION AND INFERENCE IN PANEL COINTEGRATION" I can only replicate Table 2,
+    #	row 2, column 1 (=23.282) iff "DFt = sqrt(1.25)*trho + sqrt(1.875)*n"
+
+
+    # TODO: DFpstar and DFtstar are for cointegration with endogenous relationships
+    # DFpstar =
+    # DFtstar =
+
+    # TODO: add ADF test version
+
+    # Critical Probability
+    matrix mout = zeros(2,2)
+    scalar mout[1,] = pvalue(z,DFp) ~ DFp
+    scalar mout[2,] = pvalue(z,abs(DFt)) ~ DFt
+    rownames(mout,"Prob_DF_p prob_DF_t")
+    colnames(mout, "Prob. Teststat")
+    #scalar pv_DFpstar = pvalue(z,abs(DFpstar))
+    #scalar pv_DFtstar = pvalue(z,abs(DFtstar))
+
+    if verbose==1
+        printf "\n*****************************************************\n"
+        printf "*** Panel no-Cointegration Test Results, Kao (1999)  ***\n"
+        printf "\nEstimated rho = %6.4f\n", rho
+        printf "\nH0: no cointgration\n"
+        printf "\nCritical Probability:\n"
+        printf "-----------------------\n"
+        printf "DF_p test = %6.4f (%.4f)\n", mout[1,1],mout[1,2]
+        printf "DF_t test = %6.4f (%.4f)\n", mout[2,1],mout[2,2]
+        printf "\n*****************************************************\n"
+    endif
+
+    return mout
+end function
+
+
+scalar runEX = 1
+
+if runEX
+
+
+   #---------------------------------------------------
+   # Example: Replicate Baltagi (5th ed., ch. 12.7.2,
+   # example 2: Internation R&D spillover)
+   # AND Chihwa Kao, Min-Hsien Chiang and Bangtian Che: "INTERNATIONAL R&D SPILLOVERS: AN
+   # APPLICATION OF ESTIMATION AND INFERENCE IN PANEL COINTEGRATION" I can only replicate Table 2
+   #---------------------------------------------------
+   open "/home/at/ownCloud/gretl_script/tfpcoint.wf1"
+   setobs 20 1:1 --stacked-time-series
+
+   robust = 1
+   verbose = 1
+   list X = LRD LFRD
+   M = cointPanelKao(LTFP,X,robust, verbose)
+
+endif
+
